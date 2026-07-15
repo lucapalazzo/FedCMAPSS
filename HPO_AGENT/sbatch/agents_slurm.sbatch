@@ -43,21 +43,23 @@ if [ -n "$SLURM_CPUS_PER_TASK" ] && [ "$AGENTS" -gt "$SLURM_CPUS_PER_TASK" ]; th
   echo "!!! AGENTS ($AGENTS) > cpus-per-task ($SLURM_CPUS_PER_TASK): sovraccarico CPU."; exit 1
 fi
 
-# --- preflight: NON basta importare wandb. E' init() che fallisce, e main.py:184 in quel
-#     caso disabilita il logging e allena lo stesso -> run "running" che non produce nulla,
-#     config bruciata (un grid sweep non la rimette in coda). Inoltre verifica la patch. ---
+# --- verifica patch: leggo il FILE (flcore sta sotto system/, non importabile dalla root
+#     del repo -> import fallirebbe con ModuleNotFoundError e ucciderebbe il job). ---
+grep -q "max(self.num_batches, 1)" system/flcore/clients/clientscaffold_rul.py \
+  || { echo "!!! codice NON patchato: manca il fix SCAFFOLD /0. Fai git pull."; exit 1; }
+test -f dataset/FedCMAPSS/tasks.json || { echo "!!! symlink dati mancante"; exit 1; }
+
+# --- preflight wandb: NON basta importare wandb. E' init() che fallisce, e main.py:184 in
+#     quel caso disabilita il logging e allena lo stesso -> run "running" senza metriche,
+#     config bruciata (un grid sweep non la rimette in coda). ---
 python - <<'PY'
-import os, wandb, torch, inspect
-from flcore.clients.clientscaffold_rul import clientSCAFFOLD_RUL
+import os, wandb, torch
 e = os.environ["CONDA_PREFIX"]
 assert wandb.__file__.startswith(e), f"wandb fuori env: {wandb.__file__}"
 assert torch.cuda.is_available(), "no CUDA"
-src = inspect.getsource(clientSCAFFOLD_RUL)
-assert "max(self.num_batches, 1)" in src, "!!! codice NON patchato: manca il fix SCAFFOLD /0"
 r = wandb.init(project="smoke_test", reinit=True); r.log({"x": 1}); r.finish()
-print("PREFLIGHT OK:", wandb.__version__, torch.__version__, "| patch SCAFFOLD presente")
+print("PREFLIGHT OK:", wandb.__version__, torch.__version__)
 PY
-test -f dataset/FedCMAPSS/tasks.json || { echo "!!! symlink dati mancante"; exit 1; }
 
 END_TS=$(scontrol show job "$SLURM_JOB_ID" 2>/dev/null | grep -oP 'EndTime=\K[^ ]+' | head -1)
 DEADLINE=$(date -d "$END_TS" +%s 2>/dev/null || echo $(( $(date +%s) + 345*60 )))
