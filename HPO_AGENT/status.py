@@ -19,6 +19,8 @@ import wandb
 
 ENTITY_PROJECT = "ngslung/HPO_AGENT_FedCMAPSS"
 KEY = "global/test_rmse"
+# tutte le metriche globali loggate da serverbase_rul.py:133
+KEYS = ["global/test_rmse", "global/train_rmse", "global/test_nasa_score", "global/train_nasa_score"]
 FINAL_ROUND = 100   # una run "conclusa" arriva a round 100 (history len ~101)
 
 # Baseline del paper da battere, per campagna. (task, model) -> (paper_rmse, best_in_row, criterio)
@@ -36,7 +38,32 @@ def final_rmse(run):
     return (len(h), h[-1][KEY] if h else None)
 
 
-def snapshot(sweep_id):
+def last_stats(run):
+    """Ultimo punto loggato: round + tutte le metriche globali. {} se non ha ancora loggato."""
+    h = run.history(keys=KEYS, pandas=False)
+    if not h:
+        return {"round": 0}
+    last = h[-1]
+    return {
+        "round": len(h),
+        "test_rmse": last.get("global/test_rmse"),
+        "train_rmse": last.get("global/train_rmse"),
+        "test_nasa": last.get("global/test_nasa_score"),
+    }
+
+
+def cfg_str(c):
+    """Etichetta compatta della config (solo gli assi variati piu' comuni)."""
+    parts = [f"{c.get('task')}", f"{str(c.get('model','')).replace('_RUL','')}"]
+    for k, sym in [("alpha", "a"), ("local_learning_rate", "lr"),
+                   ("server_learning_rate", "slr"), ("local_epochs", "le"),
+                   ("fedcross_alpha", "ca"), ("collaberative_model_select_strategy", "cmss")]:
+        if c.get(k) is not None:
+            parts.append(f"{sym}={c.get(k)}")
+    return " ".join(parts)
+
+
+def snapshot(sweep_id, detail=False):
     s = wandb.Api().sweep(f"{ENTITY_PROJECT}/{sweep_id}")
     runs = list(s.runs)
     n = len(runs)
@@ -53,16 +80,36 @@ def snapshot(sweep_id):
     # ---------- STATO ----------
     st = Counter(r.state for r in runs)
     hosts = Counter((r.metadata or {}).get("host", "?") for r in runs)
+    # host -> tipo GPU (per sapere DOVE gira: dgx=A100, worker4=..., h100=H100)
+    host_gpu = {}
+    for r in runs:
+        m = r.metadata or {}
+        if m.get("host"):
+            host_gpu.setdefault(m["host"], m.get("gpu", "?"))
     finished = [(r, rd, v) for (r, rd, v) in info if r.state == "finished" and v is not None]
     running = [(r, rd, v) for (r, rd, v) in info if r.state == "running"]
     print("\n### STATO")
     print(f"  config toccate : {n}")
     print(f"  stati          : {dict(st)}")
-    print(f"  host (agent)   : {dict(hosts)}")
     print(f"  concluse (r{FINAL_ROUND}): {len(finished)}")
+    print(f"  DOVE gira      :")
+    for h, c in hosts.most_common():
+        print(f"      {h:10s} {c:>3} run   [{host_gpu.get(h,'?')}]")
     if running:
         rounds_live = [rd for (_, rd, _) in running]
         print(f"  in corso       : {len(running)}  (round: min {min(rounds_live)}, max {max(rounds_live)})")
+
+    # ---------- RUN IN CORSO (dettaglio: round + RMSE corrente) ----------
+    if running:
+        print(f"\n### RUN IN CORSO ({len(running)})  round/{FINAL_ROUND} + RMSE corrente (parziale)")
+        print(f"  {'round':>7} {'test_rmse':>10} {'train':>8}  {'host':>8}  config")
+        for r, rd, v in sorted(running, key=lambda t: -t[1]):   # piu' avanti in alto
+            st_ = last_stats(r)
+            tr = st_.get("test_rmse"); trn = st_.get("train_rmse")
+            bar = f"{rd:>3}/{FINAL_ROUND}"
+            print(f"  {bar:>7} {(f'{tr:.2f}' if tr is not None else '-'):>10} "
+                  f"{(f'{trn:.2f}' if trn is not None else '-'):>8}  "
+                  f"{(r.metadata or {}).get('host','?'):>8}  {cfg_str(r.config)}")
 
     # ---------- PROBLEMI ----------
     print("\n### PROBLEMI")
@@ -94,21 +141,25 @@ def snapshot(sweep_id):
             k = (r.config.get("task"), r.config.get("model"))
             if k not in best or v < best[k][2]:
                 best[k] = (r, rd, v)
-        print(f"  {'RMSE':>7} {'task':>4} {'model':>13} {'lr':>7} {'slr':>4} {'le':>3}   note")
-        for r, rd, v in finished[:15]:
+        limit = len(finished) if detail else 15
+        print(f"  {'RMSE':>7} {'NASA_sc':>9} {'task':>4} {'model':>13} {'lr':>7} {'slr':>4} {'le':>3} {'host':>8}   note")
+        for r, rd, v in finished[:limit]:
             c = r.config
             k = (c.get("task"), c.get("model"))
+            nasa = last_stats(r).get("test_nasa")
+            host = (r.metadata or {}).get("host", "?")
             note = ""
             if k in PAPER:
                 name, paper_v, target, crit = PAPER[k]
-                if v <= target: note = f"** BATTE il criterio {crit}"
+                if v <= target: note = f"** BATTE {crit}"
                 elif v < paper_v: note = f"+ meglio del paper ({paper_v})"
             mark = " <BEST" if k in best and best[k][0].id == r.id else ""
-            print(f"  {v:>7.2f} {str(c.get('task')):>4} {str(c.get('model')):>13} "
+            print(f"  {v:>7.2f} {(f'{nasa:.0f}' if nasa is not None else '-'):>9} "
+                  f"{str(c.get('task')):>4} {str(c.get('model')):>13} "
                   f"{str(c.get('local_learning_rate')):>7} {str(c.get('server_learning_rate','-')):>4} "
-                  f"{str(c.get('local_epochs')):>3}   {note}{mark}")
-        if len(finished) > 15:
-            print(f"  ... e altre {len(finished)-15} concluse")
+                  f"{str(c.get('local_epochs')):>3} {host:>8}   {note}{mark}")
+        if not detail and len(finished) > 15:
+            print(f"  ... e altre {len(finished)-15} concluse  (usa --detail per vederle tutte)")
 
         # riepilogo vs paper per le celle-criterio
         print("\n  -- vs criterio del paper --")
@@ -124,10 +175,11 @@ if __name__ == "__main__":
     ap.add_argument("sweep_id")
     ap.add_argument("--watch", action="store_true")
     ap.add_argument("--every", type=int, default=60)
+    ap.add_argument("--detail", action="store_true", help="mostra TUTTE le run concluse, non solo le 15 migliori")
     a = ap.parse_args()
     while True:
         try:
-            snapshot(a.sweep_id)
+            snapshot(a.sweep_id, detail=a.detail)
         except Exception as e:
             print(f"errore: {e}", file=sys.stderr)
         if not a.watch:
