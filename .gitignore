@@ -15,4 +15,6 @@ metrics/
 runs/
 *.png
 *.csv
-*.pt
+*.ptoutput/
+dataset/FedCMAPSS
+HPO_AGENT/logs/

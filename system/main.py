@@ -2,6 +2,7 @@
 import copy
 import torch
 import argparse
+import sys
 import os
 import time
 import warnings
@@ -681,6 +682,18 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     args = apply_missing_config_override(args)
+
+    # RULModelFactory applica dei default per-modello a local_learning_rate e batch_size.
+    # Prima li applicava SEMPRE, calpestando i valori passati da riga di comando (il
+    # factory gira a main.py:201, prima che i client vengano costruiti): il flag veniva
+    # accettato, loggato su W&B e poi ignorato. Qui marchiamo quali flag sono arrivati
+    # davvero dalla CLI, cosi' il factory puo' rispettarli. Non basta confrontare col
+    # default di argparse: passare esplicitamente il valore di default e' legittimo.
+    def _from_cli(*opts):
+        return any(tok.split("=", 1)[0] in opts for tok in sys.argv[1:])
+
+    args._lr_from_cli = _from_cli("-lr", "--local_learning_rate")
+    args._bs_from_cli = _from_cli("-lbs", "--batch_size")
 
     # Resolve which CUDA device(s) to use: CLI flag takes priority, otherwise honor existing env, else default to "0"
     resolved_device_id = args.device_id if args.device_id is not None else os.environ.get("CUDA_VISIBLE_DEVICES", "0")

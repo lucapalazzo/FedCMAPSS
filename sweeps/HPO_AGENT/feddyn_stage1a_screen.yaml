@@ -1,0 +1,75 @@
+# Campaign 1 / STAGE 1a — FedDyn alpha screen (human-approved pruning, 2026-07-11)
+#
+# Why this exists: the full 864-run grid costs ~975 GPU-hours (measured, not the
+# prompt's 15-min/run assumption), which alone exceeds the 500 GPU-h escalation
+# trigger. See HPO_AGENT/results/00_preflight_blockers.md (B6, B7).
+#
+# This stage isolates the ONE variable the whole campaign hypothesis rests on:
+# the dynamic-regularizer strength `alpha`. The paper never passed --alpha, so its
+# FedDyn numbers were produced at the argparse default alpha=1.0 (main.py:619) --
+# the TOP of this grid. If alpha is the lever behind FedDyn's collapse, lowering it
+# will show up here for ~15 GPU-h instead of ~975.
+#
+# Everything else is held constant, so any RMSE movement is attributable to alpha/lr.
+# Baseline to beat: paper Table II, FedDyn LSTM Task A = 23.45 +/- 0.72. Success <= 22.
+#
+# Grid: 6 alpha x 4 local_lr = 24 runs (~37 min each => ~15 GPU-h)
+# Stage 1b will expand ONLY around the winning alpha band (task B, AttBiGRU,
+# splits {0,1,3}, local_epochs {1,5,10}).
+
+program: system/main.py
+project: HPO_AGENT_FedCMAPSS
+entity: ngslung
+name: HPO_AGENT_feddyn_stage1a_screen
+method: grid
+
+command:
+  - ${env}
+  - ${interpreter}
+  - -u
+  - system/main.py
+  - --wandb-log
+  - --wandb-project
+  - HPO_AGENT_FedCMAPSS
+  - --wandb-group
+  - feddyn_stage1a_screen
+  - --wandb-tags
+  - hpo-agent
+  - campaign-1
+  - stage-1a
+  - screen
+  - algo-FedDyn
+  - task-A
+  - model-LSTM
+  - --dataset
+  - FedCMAPSSWindow
+  - --data_root
+  - dataset/FedCMAPSS/
+  - ${args}
+
+parameters:
+  # ---- held constant (isolate alpha) ----
+  task:
+    values: ["A"]
+  split:
+    values: [0]
+  model:
+    values: ["LSTM_RUL"]
+  algorithm:
+    values: ["FedDyn_RUL"]
+  local_epochs:
+    values: [1]
+  global_rounds:
+    values: [100]
+  no_clip_rul:
+    values: [false]
+  output_clip_0_1:
+    values: [false]
+  output_sigmoid:
+    values: [true]
+  # ---- swept ----
+  # paper baseline == alpha 1.0 (never overridden by its sweeps)
+  alpha:
+    values: [0.0001, 0.001, 0.01, 0.1, 0.5, 1.0]
+  local_learning_rate:
+    values: [0.0005, 0.001, 0.005, 0.01]

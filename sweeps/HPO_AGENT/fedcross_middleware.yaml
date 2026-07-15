@@ -1,0 +1,76 @@
+# Campaign 4 — FedCross robustness check
+#
+# REDESIGNED vs stub (see HPO_AGENT/results/00_preflight_blockers.md, B4).
+#
+# The stub swept `n_middleware: {3,5,7}`. That hyperparameter DOES NOT EXIST.
+# FedCross's middleware-model count is derived, not configured (servercross_rul.py:32):
+#     self.w_locals_num = self.num_join_clients
+# and num_clients is itself overwritten from tasks.json (serverbase_rul.py:22).
+# So the middleware count is pinned to the task's client count and cannot be set to
+# 3/5/7 without editing servercross_rul.py, which the rules of engagement forbid.
+# `--n_middleware` also just crashes argparse.
+#
+# Human approved (2026-07-11) swapping in FedCross's REAL tunables, which answer the
+# same question -- "is the default configuration optimal, or is there headroom?":
+#   * fedcross_alpha (-ca, default 0.99): self-weight in cross-aggregation. The
+#     collaborator gets 1 - alpha, so 0.99 means each middleware model absorbs only
+#     1% of its partner per round. This is the knob the paper left untouched.
+#   * collaberative_model_select_strategy (-cmss, default 1): which peer to merge with.
+#       0 = round-robin offset   1 = LEAST-similar (default)   2 = MOST-similar
+#
+# local_epochs pinned to 5 (mid of the paper's {1,5,10}) to hold the approved 144-run
+# budget; it is a confound-free constant, not a swept axis.
+#
+# Grid: 4 fedcross_alpha x 3 cmss x 2 model x 2 task x 3 split = 144 runs
+
+program: system/main.py
+project: HPO_AGENT_FedCMAPSS
+entity: ngslung
+name: HPO_AGENT_fedcross_middleware
+method: grid
+
+command:
+  - ${env}
+  - ${interpreter}
+  - -u
+  - system/main.py
+  - --wandb-log
+  - --wandb-project
+  - HPO_AGENT_FedCMAPSS
+  - --wandb-group
+  - fedcross_middleware
+  - --wandb-tags
+  - hpo-agent
+  - campaign-4
+  - pilot
+  - algo-FedCross
+  - --dataset
+  - FedCMAPSSWindow
+  - --data_root
+  - dataset/FedCMAPSS/
+  - ${args}
+
+parameters:
+  task:
+    values: ["B", "C"]
+  global_rounds:
+    values: [100]
+  split:
+    values: [0, 1, 3]
+  local_epochs:
+    values: [5]
+  no_clip_rul:
+    values: [false]
+  output_clip_0_1:
+    values: [false]
+  output_sigmoid:
+    values: [true]
+  model:
+    values: ["LSTM_RUL", "AttBiGRU_RUL"]
+  algorithm:
+    values: ["FedCross_RUL"]
+  # ---- Method-specific HP grid (paper baseline: 0.99 / strategy 1) ----
+  fedcross_alpha:
+    values: [0.9, 0.95, 0.99, 0.999]
+  collaberative_model_select_strategy:
+    values: [0, 1, 2]

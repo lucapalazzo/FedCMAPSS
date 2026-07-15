@@ -1,0 +1,69 @@
+# Campaign 3 — SCAFFOLD client_lr x server_lr
+#
+# This was the ONLY stub that was runnable as written: both local_learning_rate and
+# server_learning_rate exist and are wired in (serverscaffold_rul.py:21 and :112).
+# Only changes: data_root now resolves (symlink dataset/FedCMAPSS -> output/), and
+# split [0,1,2] -> [0,1,3] (the paper's grid skips split 2).
+#
+# Paper baseline: server_learning_rate default = 1.0 (main.py:636), never overridden.
+#
+# Grid: 3 lr x 2 server_lr x 2 local_epochs x 2 model x 2 task x 3 split = 144 runs
+
+program: system/main.py
+project: HPO_AGENT_FedCMAPSS
+entity: ngslung
+name: HPO_AGENT_scaffold_lr_pairs
+method: grid
+
+command:
+  - ${env}
+  - ${interpreter}
+  - -u
+  - system/main.py
+  - --wandb-log
+  - --wandb-project
+  - HPO_AGENT_FedCMAPSS
+  - --wandb-group
+  - scaffold_lr_pairs
+  - --wandb-tags
+  - hpo-agent
+  - campaign-3
+  - pilot
+  - algo-SCAFFOLD
+  - --dataset
+  - FedCMAPSSWindow
+  - --data_root
+  - dataset/FedCMAPSS/
+  - ${args}
+
+parameters:
+  task:
+    values: ["C", "E"]
+  global_rounds:
+    values: [100]
+  split:
+    values: [0, 1, 3]
+  local_epochs:
+    values: [5, 10]
+  no_clip_rul:
+    values: [false]
+  output_clip_0_1:
+    values: [false]
+  output_sigmoid:
+    values: [true]
+  model:
+    values: ["LSTM_RUL", "AttBiGRU_RUL"]
+  algorithm:
+    values: ["SCAFFOLD_RUL"]
+  # Griglia lr allargata (approvato 2026-07-14) da {0.001,0.005,0.01} a 5 valori.
+  # Motivo: lo Stage 1a di FedDyn, una volta corretto il bug del factory che forzava
+  # lr=0.01, mostra che (a) i lr sotto 0.01 sono NETTAMENTE peggiori (RMSE 27-28 contro
+  # 19-20) e (b) l'ottimo cade su 0.01, cioe' sul BORDO della griglia -- segno tipico che
+  # l'ottimo vero sta fuori. La griglia originale del prompt aveva lo stesso bordo, quindi
+  # avrebbe rischiato di concludere "vince 0.01" senza mai guardare sopra.
+  # 0.01 resta incluso: e' il controllo, ed e' la configurazione con cui il paper ha
+  # prodotto la Tabella IV (il factory lo imponeva a tutti i modelli).
+  local_learning_rate:
+    values: [0.001, 0.005, 0.01, 0.05, 0.1]
+  server_learning_rate:
+    values: [0.5, 1.0]

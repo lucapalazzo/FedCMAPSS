@@ -66,20 +66,41 @@ class clientSCAFFOLD_RUL(Client_RUL):
         self.global_c = global_c
         self.global_model = model
 
+    # ------------------------------------------------------------------ #
+    # DEVIAZIONE DALLE REGOLE D'INGAGGIO (approvata dall'umano 2026-07-15)
+    #
+    # Questo file (clients/*_rul.py) e' nella lista "MUST NOT modify". La patch e'
+    # stata autorizzata esplicitamente perche' il codice originale ha un bug che rende
+    # SCAFFOLD non eseguibile sul task E, non un problema di iperparametri.
+    #
+    # Bug: num_batches = len(trainloader) con drop_last=True (clientbase_rul.py:37).
+    # Sul task E (few-shot) ogni client ha 1 sola finestra < batch_size -> 0 batch ->
+    #   1/self.num_batches = 1/0 -> nan/crash. Verificato: 10/10 client E con 0 batch.
+    # Sul task C (21 finestre) -> 1 batch -> nessun crash.
+    #
+    # `nb = max(num_batches, 1)` evita la divisione per zero. ATTENZIONE alla semantica:
+    # con 0 batch il loop di training in train() non fa NESSUN passo di ottimizzazione,
+    # quindi il client non aggiorna il modello e il suo control-variate resta invariato.
+    # La patch fa girare SCAFFOLD su E, ma quei client non contribuiscono: e' il minimo
+    # per rendere il metodo eseguibile, NON un modo per renderlo competitivo sul few-shot.
+    # Nessun effetto sui task con dati sufficienti: se num_batches>=1, il valore e' identico.
+    # ------------------------------------------------------------------ #
     def update_yc(self, max_local_epochs=None):
         if max_local_epochs is None:
             max_local_epochs = self.local_epochs
+        nb = max(self.num_batches, 1)   # patch: evita 1/0 sui client few-shot (task E)
         for ci, c, x, yi in zip(self.client_c, self.global_c, self.global_model.parameters(), self.model.parameters()):
-            ci.data = ci - c + 1/self.num_batches/max_local_epochs/self.learning_rate * (x - yi)
+            ci.data = ci - c + 1/nb/max_local_epochs/self.learning_rate * (x - yi)
 
     def delta_yc(self, max_local_epochs=None):
         if max_local_epochs is None:
             max_local_epochs = self.local_epochs
+        nb = max(self.num_batches, 1)   # patch: evita 1/0 sui client few-shot (task E)
         delta_y = []
         delta_c = []
         for c, x, yi in zip(self.global_c, self.global_model.parameters(), self.model.parameters()):
             delta_y.append(yi - x)
-            delta_c.append(- c + 1/self.num_batches/max_local_epochs/self.learning_rate * (x - yi))
+            delta_c.append(- c + 1/nb/max_local_epochs/self.learning_rate * (x - yi))
 
         return delta_y, delta_c
 

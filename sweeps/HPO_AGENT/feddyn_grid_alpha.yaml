@@ -1,0 +1,65 @@
+# Campaign 1 — FedDyn dynamic-regularizer strength sweep
+#
+# CORRECTED vs stub (see HPO_AGENT/results/00_preflight_blockers.md):
+#   * `alpha_coef` -> `alpha`. FedDyn reads args.alpha (serverdyn_rul.py:22,
+#     clientdyn_rul.py:11). `alpha_coef` is not a CLI flag; it crashed argparse.
+#   * The paper never passes --alpha, so its FedDyn numbers used the argparse
+#     default alpha=1.0 (main.py:619) -- NOT 0.01 as HPO_AGENT/README.md claims.
+#     alpha=1.0 sits at the TOP of this grid; the search direction is downward.
+#   * split [0,1,2] -> [0,1,3]: the paper's grid skips split 2, so [0,1,3] keeps
+#     gap-closure numbers comparable to Tables II/III.
+#
+# Grid: 6 alpha x 4 lr x 3 local_epochs x 2 model x 2 task x 3 split = 864 runs
+
+program: system/main.py
+project: HPO_AGENT_FedCMAPSS
+entity: ngslung
+name: HPO_AGENT_feddyn_grid_alpha
+method: grid
+
+command:
+  - ${env}
+  - ${interpreter}
+  - -u
+  - system/main.py
+  - --wandb-log
+  - --wandb-project
+  - HPO_AGENT_FedCMAPSS
+  - --wandb-group
+  - feddyn_grid_alpha
+  - --wandb-tags
+  - hpo-agent
+  - campaign-1
+  - pilot
+  - algo-FedDyn
+  - --dataset
+  - FedCMAPSSWindow
+  - --data_root
+  - dataset/FedCMAPSS/
+  - ${args}
+
+parameters:
+  task:
+    values: ["A", "B"]
+  global_rounds:
+    values: [100]
+  split:
+    values: [0, 1, 3]
+  local_epochs:
+    values: [1, 5, 10]
+  no_clip_rul:
+    values: [false]
+  output_clip_0_1:
+    values: [false]
+  output_sigmoid:
+    values: [true]
+  model:
+    values: ["LSTM_RUL", "AttBiGRU_RUL"]
+  algorithm:
+    values: ["FedDyn_RUL"]
+  # ---- Method-specific HP grid ----
+  # paper baseline == alpha 1.0 (argparse default, never overridden by its sweeps)
+  alpha:
+    values: [0.0001, 0.001, 0.01, 0.1, 0.5, 1.0]
+  local_learning_rate:
+    values: [0.0005, 0.001, 0.005, 0.01]

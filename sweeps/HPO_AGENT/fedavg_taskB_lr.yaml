@@ -1,0 +1,63 @@
+# Campaign 2 — FedAvg Task B (Chen_CNN catastrophic case, paper RMSE 46.78 +/- 3.02)
+#
+# CORRECTED vs stub (see HPO_AGENT/results/00_preflight_blockers.md):
+#   * `weight_decay` REMOVED — not a CLI flag; crashed argparse.
+#   * `momentum` REMOVED — it parses (it exists as -mo, added for FedDBE) but is a
+#     SILENT NO-OP: every RUL client optimizes with, verbatim (clientbase.py:47),
+#         torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
+#     with no momentum= and no weight_decay=. Keeping those axes would have run
+#     540 jobs and produced a heat-map over two axes that do nothing.
+#     Dropping them keeps the optimizer bit-identical to the paper's runs.
+#   * split [0,1,2] -> [0,1,3] (paper's grid skips split 2).
+#
+# Grid: 5 lr x 3 local_epochs x 2 model x 3 split = 90 runs (was a nominal 540)
+
+program: system/main.py
+project: HPO_AGENT_FedCMAPSS
+entity: ngslung
+name: HPO_AGENT_fedavg_taskB_lr
+method: grid
+
+command:
+  - ${env}
+  - ${interpreter}
+  - -u
+  - system/main.py
+  - --wandb-log
+  - --wandb-project
+  - HPO_AGENT_FedCMAPSS
+  - --wandb-group
+  - fedavg_taskB_lr
+  - --wandb-tags
+  - hpo-agent
+  - campaign-2
+  - pilot
+  - algo-FedAvg
+  - task-B
+  - --dataset
+  - FedCMAPSSWindow
+  - --data_root
+  - dataset/FedCMAPSS/
+  - ${args}
+
+parameters:
+  task:
+    values: ["B"]
+  global_rounds:
+    values: [100]
+  split:
+    values: [0, 1, 3]
+  local_epochs:
+    values: [1, 5, 10]
+  no_clip_rul:
+    values: [false]
+  output_clip_0_1:
+    values: [false]
+  output_sigmoid:
+    values: [true]
+  model:
+    values: ["Chen_CNN_RUL", "LSTM_RUL"]
+  algorithm:
+    values: ["FedAvg_RUL"]
+  local_learning_rate:
+    values: [0.0001, 0.0005, 0.001, 0.005, 0.01]
